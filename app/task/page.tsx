@@ -43,6 +43,8 @@ import { useTaskContacts } from "@/hooks/useTaskContacts";
 import { CONTACT_ROLES } from "@/lib/contacts";
 import { useSubtasks, MAX_SUBTASK_LENGTH } from "@/hooks/useSubtasks";
 import { useAuth } from "@/hooks/useAuth";
+import { canUseAiSubtasks } from "@/lib/plans";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/hooks/use-toast";
 import Image from "next/image";
 import { useDropzone } from "react-dropzone";
@@ -61,8 +63,10 @@ function TaskForm() {
     removeImage,
     error,
   } = useTaskManager(taskId);
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const { toast } = useToast();
+  // AI suggestions are only for the Pro plan (the server checks this too)
+  const canSuggest = canUseAiSubtasks(user?.subscription_plan);
   const [uploading, setUploading] = useState(false);
 
   // People linked to this task
@@ -512,7 +516,7 @@ function TaskForm() {
               type="button"
               variant="outline"
               size="sm"
-              disabled={isSuggesting}
+              disabled={isSuggesting || !canSuggest}
               onClick={handleSuggest}
             >
               {isSuggesting ? (
@@ -521,8 +525,22 @@ function TaskForm() {
                 <Sparkles className="mr-2 h-4 w-4" />
               )}
               {isSuggesting ? "Thinking..." : "Suggest subtasks with AI"}
+              {!canSuggest && (
+                <Badge variant="secondary" className="ml-2">
+                  Pro
+                </Badge>
+              )}
             </Button>
           </div>
+          {!canSuggest && (
+            <p className="text-sm text-gray-500">
+              AI subtask suggestions are part of the Pro plan.{" "}
+              <Link href="/profile" className="underline">
+                Upgrade on your Profile page
+              </Link>
+              .
+            </p>
+          )}
           {subtasksError ? (
             <p className="text-sm text-gray-500">{subtasksError}</p>
           ) : isLoadingSubtasks ? (
