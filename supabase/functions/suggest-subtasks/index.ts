@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import OpenAI from "npm:openai";
 import { SUPABASE_PUBLISHABLE_KEY } from "../_shared/supabaseKeys.ts";
+import { canUseAiSubtasks } from "../_shared/plans.ts";
 import {
   MAX_SUBTASK_LENGTH,
   MAX_SUGGESTIONS,
@@ -68,6 +69,25 @@ Deno.serve(async (req) => {
       data: { user },
     } = await supabaseClient.auth.getUser();
     if (!user) return jsonResponse({ error: "No user found" }, 401);
+
+    // AI suggestions are only for the Pro plan. This is checked here, on the server, so
+    // it cannot be skipped from the app, and BEFORE calling OpenAI so it costs nothing.
+    // If the plan cannot be read, the answer is "no".
+    const { data: profile } = await supabaseClient
+      .from("profiles")
+      .select("subscription_plan")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!canUseAiSubtasks(profile?.subscription_plan)) {
+      return jsonResponse(
+        {
+          error:
+            "AI subtask suggestions are part of the Pro plan. Upgrade your plan on the Profile page.",
+          code: "upgrade_required",
+        },
+        403
+      );
+    }
 
     // Read the task. Row Level Security returns it only if it is the caller's own task,
     // so a task of somebody else looks like "not found". Check this BEFORE calling
