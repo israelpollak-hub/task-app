@@ -27,6 +27,11 @@ import {
   ArrowLeft,
   Trash2,
   AlertOctagon,
+  Plus,
+  Check,
+  X,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { getLabelOptions } from "@/lib/labels";
 import { format } from "date-fns";
@@ -36,6 +41,7 @@ import { useTaskManager } from "@/hooks/useTaskManager";
 import { Task, ContactRole } from "@/types/models";
 import { useTaskContacts } from "@/hooks/useTaskContacts";
 import { CONTACT_ROLES } from "@/lib/contacts";
+import { useSubtasks, MAX_SUBTASK_LENGTH } from "@/hooks/useSubtasks";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/hooks/use-toast";
 import Image from "next/image";
@@ -110,6 +116,73 @@ function TaskForm() {
         description: error.message || "Failed to remove the person",
         variant: "destructive",
       });
+    }
+  };
+
+  // Subtasks of this task, and the AI suggestions waiting for an answer
+  const {
+    subtasks,
+    suggestions,
+    isLoadingSubtasks,
+    isSuggesting,
+    subtasksError,
+    addSubtask,
+    toggleDone,
+    deleteSubtask,
+    suggest,
+    acceptSuggestion,
+    rejectSuggestion,
+    clearSuggestions,
+  } = useSubtasks(taskId);
+  const [newSubtask, setNewSubtask] = useState("");
+
+  const showSubtaskError = (title: string, error: any, fallback: string) => {
+    toast({
+      title,
+      description: error?.message || fallback,
+      variant: "destructive",
+    });
+  };
+
+  const handleAddSubtask = async () => {
+    if (!newSubtask.trim()) return;
+    try {
+      await addSubtask(newSubtask);
+      setNewSubtask("");
+    } catch (error: any) {
+      showSubtaskError("❌ Could not add", error, "Failed to add the subtask");
+    }
+  };
+
+  const handleToggleSubtask = async (subtaskId: string, isDone: boolean) => {
+    try {
+      await toggleDone(subtaskId, isDone);
+    } catch (error: any) {
+      showSubtaskError("❌ Could not update", error, "Failed to update the subtask");
+    }
+  };
+
+  const handleDeleteSubtask = async (subtaskId: string) => {
+    try {
+      await deleteSubtask(subtaskId);
+    } catch (error: any) {
+      showSubtaskError("❌ Could not delete", error, "Failed to delete the subtask");
+    }
+  };
+
+  const handleSuggest = async () => {
+    try {
+      await suggest();
+    } catch (error: any) {
+      showSubtaskError("❌ No suggestions", error, "Could not get suggestions");
+    }
+  };
+
+  const handleAcceptSuggestion = async (title: string) => {
+    try {
+      await acceptSuggestion(title);
+    } catch (error: any) {
+      showSubtaskError("❌ Could not add", error, "Failed to add the subtask");
     }
   };
 
@@ -425,6 +498,145 @@ function TaskForm() {
                   All your contacts are already in this task.
                 </p>
               )}
+            </div>
+          )}
+        </div>
+        <div className="grid w-full items-center gap-1.5">
+          <div className="flex items-center justify-between">
+            <Label>
+              Subtasks
+              {subtasks.length > 0 &&
+                ` (${subtasks.filter((s) => s.is_done).length}/${subtasks.length} done)`}
+            </Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isSuggesting}
+              onClick={handleSuggest}
+            >
+              {isSuggesting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              {isSuggesting ? "Pensando..." : "Sugerir subtareas con IA"}
+            </Button>
+          </div>
+          {subtasksError ? (
+            <p className="text-sm text-gray-500">{subtasksError}</p>
+          ) : isLoadingSubtasks ? (
+            <p className="text-sm text-gray-500">Loading...</p>
+          ) : (
+            <div className="space-y-2">
+              {subtasks.length === 0 && suggestions.length === 0 && (
+                <p className="text-sm text-gray-500">No subtasks yet.</p>
+              )}
+              {subtasks.map((subtask) => (
+                <div
+                  key={subtask.subtask_id}
+                  className="flex items-center justify-between gap-2 border rounded-md px-3 py-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Checkbox
+                      checked={subtask.is_done}
+                      onCheckedChange={(checked) =>
+                        handleToggleSubtask(subtask.subtask_id, checked === true)
+                      }
+                      aria-label={`Mark "${subtask.title}" as done`}
+                    />
+                    <span
+                      className={cn(
+                        "truncate",
+                        subtask.is_done && "line-through text-gray-400"
+                      )}
+                    >
+                      {subtask.title}
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => handleDeleteSubtask(subtask.subtask_id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="sr-only">Delete {subtask.title}</span>
+                  </Button>
+                </div>
+              ))}
+
+              {suggestions.length > 0 && (
+                <div className="space-y-2 rounded-md border border-dashed p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">
+                      AI suggestions: accept the ones you want
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearSuggestions}
+                    >
+                      Dismiss all
+                    </Button>
+                  </div>
+                  {suggestions.map((title) => (
+                    <div
+                      key={title}
+                      className="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-3 py-2"
+                    >
+                      <span className="text-sm">{title}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleAcceptSuggestion(title)}
+                        >
+                          <Check className="mr-1 h-4 w-4" />
+                          Accept
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => rejectSuggestion(title)}
+                        >
+                          <X className="mr-1 h-4 w-4" />
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newSubtask}
+                  maxLength={MAX_SUBTASK_LENGTH}
+                  placeholder="Add a subtask..."
+                  onChange={(e) => setNewSubtask(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter adds the subtask; it must not save the whole task form.
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddSubtask();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!newSubtask.trim()}
+                  onClick={handleAddSubtask}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  Add
+                </Button>
+              </div>
             </div>
           )}
         </div>

@@ -5,6 +5,7 @@ export type Task = Database["public"]["Tables"]["tasks"]["Row"];
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type Contact = Database["public"]["Tables"]["contacts"]["Row"];
 export type TaskContact = Database["public"]["Tables"]["task_contacts"]["Row"];
+export type Subtask = Database["public"]["Tables"]["subtasks"]["Row"];
 
 // The role a contact plays in a task (the database only accepts these three values).
 export type ContactRole = "responsible" | "collaborator" | "stakeholder";
