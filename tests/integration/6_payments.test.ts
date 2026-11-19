@@ -63,14 +63,16 @@ describe("Suite 6: Stripe Payments Integration", () => {
     return response;
   };
 
-  const createSubscription = async () => {
+  const createSubscription = async (
+    priceId: string | undefined = process.env.STRIPE_PRICE_ID
+  ) => {
     if (!paymentMethodId) {
       throw new Error("Payment method ID not set");
     }
     console.log(`👉 Creating Subscription with Payment ID: ${paymentMethodId}`);
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
-      items: [{ price: process.env.STRIPE_PRICE_ID }],
+      items: [{ price: priceId }],
       trial_period_days: 0,
       default_payment_method: paymentMethodId,
     });
@@ -168,4 +170,97 @@ describe("Suite 6: Stripe Payments Integration", () => {
     expect(profile.subscription_plan).toBe("free");
     expect(profile.tasks_limit).toBe(TASK_LIMITS.FREE_TIER);
   }, 30_000);
+
+  const readProfile = async () => {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select()
+      .eq("stripe_customer_id", customerId)
+      .single();
+    return profile;
+  };
+
+  test("subscription to the Pro price updates user to pro", async () => {
+    await setUserSubscriptionTier(testUser!.id, "free");
+    const subscription = await createSubscription(process.env.STRIPE_PRO_PRICE_ID);
+
+    const response = await sendWebhookEvent({
+      type: "checkout.session.completed",
+      data: { object: { subscription: subscription.id, customer: customerId } },
+    });
+    expect(response.status).toBe(200);
+
+    const profile = await readProfile();
+    expect(profile.subscription_plan).toBe("pro");
+    expect(profile.tasks_limit).toBe(TASK_LIMITS.PRO_TIER);
+
+    await stripe.subscriptions.cancel(subscription.id);
+  }, 30_000);
+
+  test("switching a subscription between Premium and Pro changes the plan", async () => {
+    await setUserSubscriptionTier(testUser!.id, "free");
+    const subscription = await createSubscription();
+    await sendWebhookEvent({
+      type: "customer.subscription.created",
+      data: { object: { id: subscription.id, customer: customerId } },
+    });
+    expect((await readProfile()).subscription_plan).toBe("premium");
+
+    // Upgrade to Pro (what the customer portal does)
+    await stripe.subscriptions.update(subscription.id, {
+      items: [{ id: subscription.items.data[0].id, price: process.env.STRIPE_PRO_PRICE_ID }],
+    });
+    const upgradeResponse = await sendWebhookEvent({
+      type: "customer.subscription.updated",
+      data: { object: { id: subscription.id, customer: customerId } },
+    });
+    expect(upgradeResponse.status).toBe(200);
+    let profile = await readProfile();
+    expect(profile.subscription_plan).toBe("pro");
+    expect(profile.tasks_limit).toBe(TASK_LIMITS.PRO_TIER);
+
+    // Downgrade back to Premium
+    await stripe.subscriptions.update(subscription.id, {
+      items: [{ id: subscription.items.data[0].id, price: process.env.STRIPE_PRICE_ID }],
+    });
+    await sendWebhookEvent({
+      type: "customer.subscription.updated",
+      data: { object: { id: subscription.id, customer: customerId } },
+    });
+    profile = await readProfile();
+    expect(profile.subscription_plan).toBe("premium");
+    expect(profile.tasks_limit).toBe(TASK_LIMITS.PREMIUM_TIER);
+
+    await stripe.subscriptions.cancel(subscription.id);
+  }, 40_000);
+
+  test("a Pro subscription that is cancelled goes back to free", async () => {
+    await setUserSubscriptionTier(testUser!.id, "free");
+    const subscription = await createSubscription(process.env.STRIPE_PRO_PRICE_ID);
+    await sendWebhookEvent({
+      type: "customer.subscription.created",
+      data: { object: { id: subscription.id, customer: customerId } },
+    });
+    expect((await readProfile()).subscription_plan).toBe("pro");
+
+    await stripe.subscriptions.cancel(subscription.id);
+    const response = await sendWebhookEvent({
+      type: "customer.subscription.deleted",
+      data: { object: { id: subscription.id, customer: customerId } },
+    });
+    expect(response.status).toBe(200);
+
+    const profile = await readProfile();
+    expect(profile.subscription_plan).toBe("free");
+    expect(profile.tasks_limit).toBe(TASK_LIMITS.FREE_TIER);
+  }, 40_000);
+
+  test("the webhook rejects an event with a wrong signature", async () => {
+    const response = await fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Stripe-Signature": "t=1,v1=bad" },
+      body: JSON.stringify({ type: "customer.subscription.deleted" }),
+    });
+    expect(response.status).toBe(400);
+  });
 });

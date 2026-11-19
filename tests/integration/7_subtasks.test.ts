@@ -4,6 +4,7 @@ import {
   getOrCreateTestUser,
   cleanupTestUser,
 } from "../test-utils/user-testing-utils";
+import { setUserSubscriptionTier } from "../test-utils/limit-testing-utils";
 
 const TEST_USER_HEIDI = {
   name: "Heidi (Test User)",
@@ -169,7 +170,29 @@ describe("Suite 7: Subtasks", () => {
   });
 
   describe("suggest-subtasks (Edge Function)", () => {
+    const askForSuggestions = async (client: SupabaseClient, taskId: string) =>
+      fetch(SUGGEST_SUBTASKS_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${await accessToken(client)}`,
+        },
+        body: JSON.stringify({ task_id: taskId }),
+      });
+
+    test("AI suggestions are only for the Pro plan: free and premium users are refused", async () => {
+      for (const plan of ["free", "premium"] as const) {
+        await setUserSubscriptionTier(heidi.id, plan);
+        const response = await askForSuggestions(heidiClient, heidiTaskId);
+        expect(response.status).toBe(403);
+        const result = await response.json();
+        expect(result.code).toBe("upgrade_required");
+        expect(result.suggestions).toBeUndefined();
+      }
+    });
+
     test("suggests 3 to 8 steps for own task and does NOT save them", async () => {
+      await setUserSubscriptionTier(heidi.id, "pro");
       const { count: before } = await heidiClient
         .from("subtasks")
         .select("*", { count: "exact", head: true })
@@ -204,6 +227,7 @@ describe("Suite 7: Subtasks", () => {
     });
 
     test("refuses a task that belongs to another user", async () => {
+      await setUserSubscriptionTier(ivan.id, "pro");
       const response = await fetch(SUGGEST_SUBTASKS_ENDPOINT, {
         method: "POST",
         headers: {

@@ -65,4 +65,21 @@ describe("Suite 5: Task Limits and Premium Features", () => {
     );
     expect(errorAboveLimit).toBeTruthy();
   });
+
+  test("pro user can exceed premium tier", async () => {
+    await setUserSubscriptionTier(testUser.id, "pro");
+    await setTasksCreatedCount(testUser.id, TASK_LIMITS.PREMIUM_TIER);
+    const { error: errorAboveLimit } = await createTask(testUser, "Pro Task");
+    expect(errorAboveLimit).toBeFalsy();
+  });
+
+  test("pro user cannot exceed pro limit", async () => {
+    await setUserSubscriptionTier(testUser.id, "pro");
+    await setTasksCreatedCount(testUser.id, TASK_LIMITS.PRO_TIER);
+    const { error: errorAboveLimit } = await createTask(
+      testUser,
+      "Pro Task (Should fail at limit)"
+    );
+    expect(errorAboveLimit).toBeTruthy();
+  });
 });

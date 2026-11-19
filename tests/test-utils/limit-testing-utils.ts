@@ -3,11 +3,12 @@ import { supabaseServiceClient } from "./supabase-client";
 export const TASK_LIMITS = {
   FREE_TIER: 100,
   PREMIUM_TIER: 10_000,
+  PRO_TIER: 50_000,
 };
 
 export async function setUserSubscriptionTier(
   userId: string | undefined,
-  tier: "free" | "premium"
+  tier: "free" | "premium" | "pro"
 ) {
   const { error: profileError } = await supabaseServiceClient
     .from("profiles")
