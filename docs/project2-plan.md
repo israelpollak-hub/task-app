@@ -334,3 +334,66 @@ Hallazgo fuera de este plan (no se cambió): el trigger de la migration 3
 (`delete_task_storage_object`) borra directo de `storage.objects`, y Supabase ahora lo
 prohíbe. Por eso borrar una tarea **que tiene imagen** falla (y también el test
 "can attach image to a task" de la suite 3). Ver el resumen final para la propuesta de arreglo.
+
+---
+
+# Parte 3: tercer nivel de precios (Pro) con Stripe
+
+## P3.1 Qué es
+
+Un tercer plan de pago, **Pro** ($25 al mes), además de Free y Premium ($10 al mes).
+
+| | Free | Premium | Pro |
+|---|---|---|---|
+| Precio | $0 | $10 / mes | $25 / mes |
+| Tareas por mes | 100 | 10,000 | 50,000 |
+| Subtareas y contactos | sí | sí | sí |
+| Etiquetas con IA al crear tareas | sí | sí | sí |
+| **Sugerencias de subtareas con IA** | no | no | **sí** |
+
+Las sugerencias de IA son la función exclusiva del plan más alto.
+
+## P3.2 Qué se configuró en Stripe (modo test, sin dinero real)
+
+- Producto **TaskMaster Pro** con un precio mensual de $25 (`price_...WqibN3`).
+- **Portal de clientes:** se activó "cambiar de plan" entre el precio de Premium y el de Pro (con
+  prorrateo), además de cancelar. Así un cliente puede subir o bajar de plan sin soporte.
+- **Webhook** (`stripe-webhook`): se agregó el evento `customer.subscription.created`. Ahora
+  escucha cuatro: `checkout.session.completed`, `customer.subscription.created`,
+  `customer.subscription.updated` y `customer.subscription.deleted`. La clave de firma no cambió.
+- Secreto nuevo en Supabase: `STRIPE_PRO_PRICE_ID` (el precio de Pro).
+
+## P3.3 Cambios en la base de datos y las funciones
+
+- **Migration `11_pro_plan.sql`:** `subscription_plan` acepta `pro`; el límite de tareas sigue al
+  plan en cualquier cambio (free 100, premium 10,000, pro 50,000). Los usuarios solo pueden *leer*
+  su perfil (no hay policy de UPDATE), así que nadie puede darse un plan a sí mismo.
+- **`stripe-webhook`:** en vez de poner siempre "premium", pide a Stripe la suscripción tal como
+  está *ahora* y decide el plan por su **precio** y su **estado**. Sirve para compras nuevas,
+  cambios de plan en el portal y cancelaciones.
+- **`create-stripe-session`:** recibe el plan elegido. Sin plan de pago, abre Stripe Checkout con el
+  precio de ese plan. Con plan de pago, abre el portal; si pide el *otro* plan, abre directo la
+  pantalla que confirma el cambio.
+- **`suggest-subtasks`:** comprueba el plan **en el servidor**, antes de leer la tarea y antes de
+  llamar a OpenAI. Free y Premium reciben un 403 (`upgrade_required`) y no se gasta nada.
+
+## P3.4 Pantallas
+
+- **Perfil:** tres tarjetas de plan (precio y funciones), la actual marcada, y botones
+  "Choose Premium", "Choose Pro", "Upgrade to Pro" o "Switch to Premium" según el caso;
+  "Manage Subscription" para quien ya paga.
+- **Tarea:** sin Pro, el botón "Suggest subtasks with AI" aparece bloqueado, con la etiqueta
+  "Pro" y un enlace a la página de perfil.
+
+## P3.5 Pruebas
+
+- SQL (`docs/project2-pro-plan-test.sql`, transacción que se cancela sola): 11 de 11.
+- Unitarias de las reglas de planes (`tests/unit/plans.test.ts`).
+- Integración: Pro en los límites (suite 5), Pro y cambios Premium <-> Pro con suscripciones
+  reales de Stripe en modo test, y firma incorrecta rechazada (suite 6), y rechazo a Free y
+  Premium en las sugerencias de IA (suite 7).
+- Prueba de punta a punta: una cuenta nueva eligió Pro en la app, la app abrió Stripe Checkout con
+  el precio de $25, y tras la suscripción Stripe envió el evento real, el webhook puso el plan
+  `pro` (50,000 tareas) y se activó el botón de IA.
+- `npm test`: 48 de 49 tests (el que falla es el problema de imágenes que ya existía).
+
