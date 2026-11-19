@@ -9,6 +9,41 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      contacts: {
+        Row: {
+          contact_id: string
+          created_at: string | null
+          email: string | null
+          name: string
+          relationship: string | null
+          user_id: string
+        }
+        Insert: {
+          contact_id?: string
+          created_at?: string | null
+          email?: string | null
+          name: string
+          relationship?: string | null
+          user_id?: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string | null
+          email?: string | null
+          name?: string
+          relationship?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string | null
@@ -39,6 +74,39 @@ export type Database = {
         }
         Relationships: []
       }
+      task_contacts: {
+        Row: {
+          contact_id: string
+          role: string
+          task_id: string
+        }
+        Insert: {
+          contact_id: string
+          role: string
+          task_id: string
+        }
+        Update: {
+          contact_id?: string
+          role?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_contacts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["contact_id"]
+          },
+          {
+            foreignKeyName: "task_contacts_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           completed: boolean | null
@@ -47,7 +115,6 @@ export type Database = {
           due_date: string | null
           image_url: string | null
           label: string | null
-          rank: number | null
           task_id: string
           title: string
           updated_at: string | null
@@ -60,7 +127,6 @@ export type Database = {
           due_date?: string | null
           image_url?: string | null
           label?: string | null
-          rank?: number | null
           task_id?: string
           title: string
           updated_at?: string | null
@@ -73,7 +139,6 @@ export type Database = {
           due_date?: string | null
           image_url?: string | null
           label?: string | null
-          rank?: number | null
           task_id?: string
           title?: string
           updated_at?: string | null

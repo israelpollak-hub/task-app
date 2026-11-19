@@ -33,7 +33,9 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useSearchParams } from "next/navigation";
 import { useTaskManager } from "@/hooks/useTaskManager";
-import { Task } from "@/types/models";
+import { Task, ContactRole } from "@/types/models";
+import { useTaskContacts } from "@/hooks/useTaskContacts";
+import { CONTACT_ROLES } from "@/lib/contacts";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/hooks/use-toast";
 import Image from "next/image";
@@ -56,6 +58,60 @@ function TaskForm() {
   const { session } = useAuth();
   const { toast } = useToast();
   const [uploading, setUploading] = useState(false);
+
+  // People linked to this task
+  const {
+    people,
+    availableContacts,
+    hasAnyContacts,
+    isLoadingPeople,
+    peopleError,
+    addPerson,
+    changeRole,
+    removePerson,
+  } = useTaskContacts(taskId);
+  const [contactToAdd, setContactToAdd] = useState("");
+  const [roleToAdd, setRoleToAdd] = useState<ContactRole>("collaborator");
+
+  const handleAddPerson = async () => {
+    if (!contactToAdd) return;
+    try {
+      await addPerson(contactToAdd, roleToAdd);
+      setContactToAdd("");
+      toast({ title: "✅ Person Added", description: "Person added to the task" });
+    } catch (error: any) {
+      toast({
+        title: "❌ Could not add",
+        description: error.message || "Failed to add the person",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleChangeRole = async (contactId: string, role: ContactRole) => {
+    try {
+      await changeRole(contactId, role);
+    } catch (error: any) {
+      toast({
+        title: "❌ Could not change the role",
+        description: error.message || "Failed to change the role",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRemovePerson = async (contactId: string) => {
+    try {
+      await removePerson(contactId);
+      toast({ title: "✅ Person Removed", description: "Person removed from the task" });
+    } catch (error: any) {
+      toast({
+        title: "❌ Could not remove",
+        description: error.message || "Failed to remove the person",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleImageUpload = async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -261,6 +317,116 @@ function TaskForm() {
           <div className="space-y-2">
             {task.image_url ? renderImageDisplay() : renderImageUpload()}
           </div>
+        </div>
+        <div className="grid w-full items-center gap-1.5">
+          <Label>People</Label>
+          {peopleError ? (
+            <p className="text-sm text-gray-500">{peopleError}</p>
+          ) : isLoadingPeople ? (
+            <p className="text-sm text-gray-500">Loading...</p>
+          ) : (
+            <div className="space-y-2">
+              {people.length === 0 && (
+                <p className="text-sm text-gray-500">No people in this task yet.</p>
+              )}
+              {people.map(({ contact, role }) => (
+                <div
+                  key={contact.contact_id}
+                  className="flex items-center justify-between gap-2 border rounded-md px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{contact.name}</div>
+                    {contact.relationship && (
+                      <div className="text-xs text-gray-500 truncate">
+                        {contact.relationship}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Select
+                      value={role}
+                      onValueChange={(value) =>
+                        handleChangeRole(contact.contact_id, value as ContactRole)
+                      }
+                    >
+                      <SelectTrigger className="w-[150px] h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CONTACT_ROLES.map((r) => (
+                          <SelectItem key={r.value} value={r.value}>
+                            {r.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleRemovePerson(contact.contact_id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span className="sr-only">Remove {contact.name}</span>
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {!hasAnyContacts ? (
+                <p className="text-sm text-gray-500">
+                  You have no contacts yet.{" "}
+                  <Link href="/contacts" className="underline">
+                    Add some on the Contacts page
+                  </Link>
+                  .
+                </p>
+              ) : availableContacts.length > 0 ? (
+                <div className="flex items-center gap-2">
+                  <Select value={contactToAdd} onValueChange={setContactToAdd}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Add a person..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableContacts.map((c) => (
+                        <SelectItem key={c.contact_id} value={c.contact_id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={roleToAdd}
+                    onValueChange={(value) => setRoleToAdd(value as ContactRole)}
+                  >
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CONTACT_ROLES.map((r) => (
+                        <SelectItem key={r.value} value={r.value}>
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!contactToAdd}
+                    onClick={handleAddPerson}
+                  >
+                    Add
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  All your contacts are already in this task.
+                </p>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex space-x-2 w-full pt-4">
           <Link href="/dashboard" className="flex-1">

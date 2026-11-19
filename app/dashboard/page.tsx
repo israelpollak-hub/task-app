@@ -5,7 +5,8 @@ import { useTaskManager } from "@/hooks/useTaskManager";
 import { Button } from "@/components/ui/button";
 import TaskList from "@/components/TaskList";
 import { CreateTaskForm } from "@/components/CreateTaskForm";
-import { PlusCircle, ClipboardList } from "lucide-react";
+import Link from "next/link";
+import { PlusCircle, ClipboardList, Users } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -31,23 +32,31 @@ export default function Dashboard() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Your Tasks</h1>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Create Task
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Task</DialogTitle>
-              <DialogDescription>
-                Enter the details for your new task below.
-              </DialogDescription>
-            </DialogHeader>
-            <CreateTaskForm onSubmit={handleCreateTask} />
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/contacts">
+              <Users className="mr-2 h-4 w-4" />
+              Contacts
+            </Link>
+          </Button>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Create Task
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Task</DialogTitle>
+                <DialogDescription>
+                  Enter the details for your new task below.
+                </DialogDescription>
+              </DialogHeader>
+              <CreateTaskForm onSubmit={handleCreateTask} />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
       {tasks.length > 0 ? (
         <div className="border rounded-md">
