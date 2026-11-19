@@ -192,3 +192,145 @@ with check (
           where c.contact_id = task_contacts.contact_id and c.user_id = auth.uid())
 );
 ```
+
+---
+
+# Parte 2: subtareas con IA
+
+Plan escrito antes de tocar código. Mismo Supabase, mismo repo, directo en `main`.
+
+## P2.1 Qué queremos lograr
+
+Que cada tarea pueda tener **subtareas** (pasos más pequeños), y que un botón pida a la IA
+**sugerencias** de subtareas para esa tarea. Una tarea tiene muchas subtareas; cada subtarea
+pertenece a una sola tarea (relación uno a muchos).
+
+## P2.2 Tabla nueva: `subtasks`
+
+| Columna | Tipo | Reglas |
+|---|---|---|
+| `subtask_id` | uuid | Clave principal, se genera sola |
+| `task_id` | uuid | Obligatorio. Apunta a `tasks` con **borrado en cascada**: si se borra la tarea, se borran sus subtareas |
+| `title` | texto | Obligatorio |
+| `is_done` | booleano | Obligatorio, por defecto `false` |
+| `position` | entero | Obligatorio, por defecto 0. Define el orden dentro de la tarea |
+| `created_at` | fecha y hora | Se llena sola |
+
+- Índice sobre (`task_id`, `position`) para leer rápido las subtareas de una tarea.
+- No lleva `user_id`: el dueño se deduce de la tarea (igual que `task_contacts`).
+- Migration nueva: `10_subtasks.sql` (no se edita ninguna de las anteriores).
+
+## P2.3 Reglas de seguridad (RLS) en español sencillo
+
+- Solo ves las subtareas **de tus propias tareas**.
+- Solo puedes crear, cambiar o borrar subtareas de tus propias tareas.
+- No puedes crear una subtarea dentro de la tarea de otra persona, ni mover una subtarea tuya
+  a la tarea de otra persona (el `with check` revisa también la tarea nueva).
+- Como la tabla no tiene `user_id`, la regla consulta `tasks`:
+  `exists (select 1 from tasks t where t.task_id = subtasks.task_id and t.user_id = auth.uid())`.
+- Una sola policy "for all" con el mismo `exists` en `using` y en `with check`.
+  Nunca `using (true)`.
+
+## P2.4 La Edge Function `suggest-subtasks`
+
+Sigue el estilo de `create-task-with-ai`:
+
+1. Recibe `{ task_id }` por POST, con el login del usuario (JWT) en `Authorization`.
+2. Crea un cliente de Supabase con ese header, así RLS aplica como si fuera el usuario.
+3. Obtiene el usuario con `auth.getUser()`; si no hay usuario, responde error.
+4. Lee la tarea con `.eq("task_id", ...)`. **Si la tarea no es de ese usuario, RLS no la
+   devuelve** y la función responde "tarea no encontrada" sin llamar a OpenAI (así no se gasta
+   dinero por tareas ajenas).
+5. Pide a OpenAI (`gpt-4o-mini`, igual que la función de etiquetas) de 3 a 8 pasos cortos, en
+   formato JSON, usando el título y la descripción de la tarea y las subtareas que ya existen
+   (para no repetirlas).
+6. Valida la respuesta: que sea JSON, texto limpio, máximo 100 caracteres cada uno, sin
+   duplicados, máximo 8. Si la respuesta no sirve, error claro; no se guarda nada raro.
+7. **Devuelve las sugerencias; no escribe en la base de datos.** El usuario decide cuáles
+   agregar (decisión 1 abajo).
+8. La clave `OPENAI_API_KEY` ya está en los secrets de Supabase; no cambia. La función usa el
+   `verify_jwt` normal (activado): solo usuarios con sesión pueden llamarla.
+
+Costo: cada clic es una llamada pequeña a `gpt-4o-mini` (centavos o menos). El límite de
+$5 en OpenAI sigue protegiendo.
+
+## P2.5 Pantallas que cambian
+
+Solo la pantalla de editar tarea (`/task?id=...`), con una sección nueva **"Subtasks"**, debajo
+de "People":
+
+- Lista de subtareas con casilla (hecha / no hecha), título y botón de borrar.
+- Un campo para agregar una subtarea a mano.
+- Un botón **"Sugerir subtareas con IA"** (la IA solo se llama cuando haces clic): muestra las
+  sugerencias y cada una tiene **Accept** (se guarda como subtarea) y **Reject** (se descarta,
+  no se guarda nada). También hay "Dismiss all".
+- Todos los botones nuevos son `type="button"` (no envían el formulario de la tarea).
+
+El dashboard y las demás pantallas no cambian.
+
+## P2.6 Archivos que se tocan
+
+- Nuevo: `supabase/migrations/10_subtasks.sql`.
+- Se regenera: `lib/database.types.ts` (con `npx supabase gen types typescript --linked`).
+- Se agrega: tipo `Subtask` en `types/models.ts`.
+- Nuevo: `hooks/useSubtasks.ts`.
+- Nuevo: `supabase/functions/suggest-subtasks/index.ts` (y, si hace falta, una pieza
+  compartida en `_shared/`).
+- Cambia: `app/task/page.tsx` (sección "Subtasks").
+- No cambian: `create-task-with-ai`, pagos, límite mensual, contactos.
+
+## P2.7 Qué se despliega y dónde
+
+| Cambio | Dónde | Comando | Efecto |
+|---|---|---|---|
+| Tabla `subtasks` | Base de datos de Supabase (**la real**) | `npx supabase db push` | Inmediato. Solo **agrega** una tabla; no toca `tasks` |
+| Función `suggest-subtasks` | Supabase Edge Functions | `npx supabase functions deploy suggest-subtasks` | Inmediato. Función nueva, nadie la usa todavía |
+| Pantalla "Subtasks" | Vercel (el sitio) | `git push` a `main` | Vercel publica solo en ~35 s |
+
+Orden: primero la base de datos, luego la función, probar todo en la computadora
+(`npm run dev`) y **solo después** `git push` (cuando lo digas). Así el sitio en vivo nunca
+llama a algo que todavía no existe.
+
+**Plan B (deshacer):** `drop table subtasks;` y borrar la función en Supabase. No afecta a
+tareas, contactos ni usuarios.
+
+## P2.8 Cómo comprobamos que funciona
+
+- Prueba SQL con **dos usuarios simulados**, dentro de una transacción que se cancela sola
+  (como `docs/project2-rls-test.sql`): A no ve ni toca las subtareas de B; A no puede crear
+  una subtarea en la tarea de B; borrar una tarea borra sus subtareas.
+- Prueba de la función: con sesión válida y tarea propia devuelve sugerencias; con tarea
+  ajena o sin sesión, error y **sin llamar a OpenAI**.
+- Prueba en la app: agregar a mano, marcar hecha, borrar, pedir sugerencias, agregar
+  algunas; y confirmar que tareas, contactos, imágenes y pagos siguen igual.
+- `tsc`, `lint`, pruebas unitarias y `next build`.
+
+## P2.9 Decisiones que tomé yo (dime si quieres cambiar alguna)
+
+1. La IA **solo sugiere**; el usuario acepta o rechaza cada una y se guardan solo las
+   aceptadas (confirmado en tu encargo).
+2. Entre 3 y **8 sugerencias** por clic (así lo pediste).
+3. El orden es el de `position`; no se reordenan con arrastrar y soltar (queda fuera de esta parte).
+4. No hay límite de subtareas por tarea por ahora.
+5. El dashboard no muestra el avance (por ejemplo "2/5"). Se puede agregar después.
+
+## P2.10 Estado de la construcción (Parte 2)
+
+Hecho y probado (falta solo publicar en GitHub y Vercel, cuando lo decidas):
+
+- Migration `supabase/migrations/10_subtasks.sql` aplicada en la base real. Nota: `db push`
+  pidió `--include-all`, porque Supabase compara los números como texto ("10" va antes que "9").
+  Solo aplicó la 10.
+- Prueba de seguridad `docs/project2-subtasks-rls-test.sql` (dos usuarios simulados, una
+  transacción que se cancela sola): 13 de 13 correctas.
+- Edge Function `suggest-subtasks` desplegada (verify_jwt activado). Las reglas de validación
+  están en `supabase/functions/_shared/subtaskRules.ts`, con pruebas unitarias.
+- Pantalla: sección "Subtasks" en `app/task/page.tsx`, con el hook `hooks/useSubtasks.ts`.
+- Test de integración `tests/integration/7_subtasks.test.ts`: 7 de 7 correctas (incluye que un
+  segundo usuario no ve ni toca las subtareas, y que la función rechaza tareas ajenas).
+- `tsc`, `lint` y `next build` pasan.
+
+Hallazgo fuera de este plan (no se cambió): el trigger de la migration 3
+(`delete_task_storage_object`) borra directo de `storage.objects`, y Supabase ahora lo
+prohíbe. Por eso borrar una tarea **que tiene imagen** falla (y también el test
+"can attach image to a task" de la suite 3). Ver el resumen final para la propuesta de arreglo.
