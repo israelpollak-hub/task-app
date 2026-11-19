@@ -261,7 +261,7 @@ de "People":
 
 - Lista de subtareas con casilla (hecha / no hecha), título y botón de borrar.
 - Un campo para agregar una subtarea a mano.
-- Un botón **"Sugerir subtareas con IA"** (la IA solo se llama cuando haces clic): muestra las
+- Un botón **"Suggest subtasks with AI"** (la IA solo se llama cuando haces clic): muestra las
   sugerencias y cada una tiene **Accept** (se guarda como subtarea) y **Reject** (se descarta,
   no se guarda nada). También hay "Dismiss all".
 - Todos los botones nuevos son `type="button"` (no envían el formulario de la tarea).

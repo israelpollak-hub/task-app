@@ -520,7 +520,7 @@ function TaskForm() {
               ) : (
                 <Sparkles className="mr-2 h-4 w-4" />
               )}
-              {isSuggesting ? "Pensando..." : "Sugerir subtareas con IA"}
+              {isSuggesting ? "Thinking..." : "Suggest subtasks with AI"}
             </Button>
           </div>
           {subtasksError ? (
